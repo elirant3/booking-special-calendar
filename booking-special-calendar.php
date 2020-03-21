@@ -13,7 +13,7 @@ defined('ABSPATH') || exit;
 
 class BSLC_Booking
 {
-    private static $bslc_db_version = '1.1.0',
+    private static $bslc_db_version = '1.1.1',
         $bslc_asset_version = '1.4.4';
     public static $success_message;
 
@@ -24,6 +24,13 @@ class BSLC_Booking
         register_activation_hook(__FILE__, __CLASS__ . '::insertDemo');
         add_action('plugins_loaded', [__CLASS__, 'updateDBCheck']);
         add_action('wp_enqueue_scripts', [__CLASS__, 'assets']);
+        add_action('admin_enqueue_scripts', [__CLASS__, 'admin_assets']);
+
+        /*set admin hours table*/
+        add_action('wp_ajax_get_bslcMeetingHours', [__CLASS__, 'getMeetingHours']);
+
+
+        add_action('wp_ajax_bslc_hourAction', [__CLASS__, 'hourAction']);
 
         add_action('wp_ajax_bslc_getCalendarHours', [__CLASS__, 'getCalendarHours']);
         add_action('wp_ajax_nopriv_bslc_getCalendarHours', [__CLASS__, 'getCalendarHours']);
@@ -40,6 +47,151 @@ class BSLC_Booking
         add_action('pre_post_update', [__CLASS__, 'checkStatus'], 10, 2);
         add_action('delete_post_special-calendar', [__CLASS__, 'checkStatus']);
         add_action('before_delete_post', [__CLASS__, 'deleteMeeting']);
+    }
+
+    public static function hourAction()
+    {
+
+        global $wpdb;
+        $json = [];
+        $nonce = filter_input(INPUT_GET, 'bslc_houraction', FILTER_SANITIZE_STRING);
+        if (!isset($_GET['bslc_houraction']) || !wp_verify_nonce($nonce, 'bslc_houraction')) {
+            $json['error'] = _x('Session has expired.', 'booking-special-calendar');
+        }
+
+        if (isset($_GET['hourid']) && !empty($_GET['hourid']) && is_numeric($_GET['hourid']) && $_GET['hourid'] > 0) {
+            $hour_id = sanitize_text_field($_GET['hourid']);
+            $sql = "SELECT * FROM " . $wpdb->prefix . "special_booking WHERE id = %d";
+            if ($result = $wpdb->get_row($wpdb->prepare($sql, $hour_id))) {
+                if (isset($_GET['trigger']) && !empty($_GET['trigger'])) {
+                    $trigger = sanitize_text_field($_GET['trigger']);
+                    $hourAttached = self::validateHourId($hour_id);
+                    if (!$hourAttached) {
+                        $btnTxt = '';
+                        $actionMsg = '';
+                        $format = ['%s'];
+                        $where = ['id' => $hour_id];
+                        $where_format = ['%d'];
+
+                        if ($trigger === 'status') {
+                            $status = $result->status == 'disabled' ? 'enabled' : 'disabled';
+                            $mysqlData = ['status' => $status];
+                            $update = $wpdb->update($wpdb->prefix . 'special_booking', $mysqlData, $where, $format, $where_format);
+                            $actionMsg = $status;
+                            if ($status === 'disabled') {
+                                $btnTxt = _x('Enable', 'booking-special-calendar');
+                            } else if ($status === 'enabled') {
+                                $btnTxt = _x('Disable', 'booking-special-calendar');
+                            }
+                        } elseif ($trigger === 'delete') {
+                            if ($delete = $wpdb->delete($wpdb->prefix . 'special_booking', ['id' => $hour_id], ['%d'])) {
+                                $actionMsg = _x('removed.', 'booking-special-calendar');
+                            } else {
+                                $btnTxt = _x('Network error.', 'booking-special-calendar');
+                            }
+                        } elseif ($trigger === 'closeOpen') {
+                            $display = $result->display === 'open' ? 'close' : 'open';
+                            $mysqlData = ['display' => $display];
+                            $update = $wpdb->update($wpdb->prefix . 'special_booking', $mysqlData, $where, $format, $where_format);
+
+                            $actionMsg = $display;
+                            if ($display === 'open') {
+                                $btnTxt = _x('Close', 'booking-special-calendar');
+                            } else if ($display === 'close') {
+                                $btnTxt = _x('Open', 'booking-special-calendar');
+                            }
+                        } else {
+                            echo '<pre>';
+                            print_r($_GET);
+                            die;
+                        }
+
+                        $json['success'] = sprintf(_x('Hour has %s successfully.', 'booking-special-calendar'), $actionMsg);
+                        $json['btn_text'] = sprintf(_x('%s', 'booking-special-calendar'), $btnTxt);
+                    } else {
+                        $json['error'] = _x('Hour is attached to a meeting. to disable hour remove meeting first.', 'booking-special-calendar');
+                    }
+                } else {
+                    $json['error'] = _x('Unknown action.', 'booking-special-calendar');
+                }
+            } else {
+                $json['error'] = _x('Unknown hour.', 'booking-special-calendar');
+            }
+        }
+
+        header('Content-Type: application/json');
+        echo json_encode($json);
+        die;
+    }
+
+    public static function getMeetingHours()
+    {
+        global $wpdb;
+        $json = new stdClass();
+        $json->data = [];
+        $json->draw = 1;
+
+        $today = date('Y-m-d H:i:s');
+        $today = date_parse($today);
+
+        $currentMonth = $today['month'];
+        $currentYear = $today['year'];
+
+        $searchValue = '';
+
+        $sql = "SELECT * FROM " . $wpdb->prefix . "special_booking";
+        $json->recordsTotal = count($wpdb->get_results($sql));
+        $start = 0;
+        $length = 10;
+
+        if (isset($_GET['draw']) && !empty($_GET['draw']) && is_numeric($_GET['draw']) && $_GET['draw'] > 0) {
+            $json->draw = sanitize_text_field($_GET['draw']);
+        }
+
+        if (isset($_GET['start']) && !empty($_GET['start']) && is_numeric($_GET['start']) && $_GET['start'] > 0) {
+            $start = sanitize_text_field($_GET['start']);
+        }
+
+        if (isset($_GET['length']) && !empty($_GET['length']) && is_numeric($_GET['length']) && $_GET['length'] > 0) {
+            $length = sanitize_text_field($_GET['length']);
+        }
+
+        if (isset($_GET['search']['value']) && !empty($_GET['search']['value']) && strlen($_GET['search']['value']) >= 3) {
+            $searchValue = sanitize_text_field($_GET['search']['value']);
+        }
+
+        if ($searchValue) {
+            $sql .= " WHERE CONCAT(h_from, h_to) LIKE '%" . esc_sql($searchValue) . "%'";
+            $sql .= " LIMIT %d, %d";
+            $result = $wpdb->get_results($wpdb->prepare($sql, $start, $length));
+            $json->recordsFiltered = count($result);
+        } else {
+            $sql .= " WHERE YEAR(h_from) = %s AND MONTH(h_from) = %s";
+            $sql .= " LIMIT %d, %d";
+            $result = $wpdb->get_results($wpdb->prepare($sql, $currentYear, $currentMonth, $start, $length));
+            $json->recordsFiltered = $json->recordsTotal;
+        }
+
+        if ($result) {
+            foreach ($result as $value) {
+                $disabled = $value->status === 'disabled' ? 'Enable' : 'Disable';
+                $endisClass = $disabled === 'Enable' ? '' : 'button-primary';
+
+                $closeOpenTxt = $value->display === 'close' ? 'Open' : 'Close';
+                $closeOpenClass = $closeOpenTxt === 'Close' ? 'button-primary' : '';
+
+                $action = '<button data-trigger="status" data-id="' . $value->id . '" class="button bslc-houraction ' . $endisClass . ' bslc-disable">' . sprintf(_x('%s', 'booking-special-calendar'), $disabled) . '</button>';
+                $action .= '<button data-trigger="delete" data-id="' . $value->id . '" class="button bslc-houraction bslc-remove">' . _x('Remove/Delete', 'booking-special-calendar') . '</button>';
+                $action .= '<button data-trigger="closeOpen" data-id="' . $value->id . '" class="button bslc-houraction ' . $closeOpenClass . ' bslc-close">' . sprintf(_x('%s', 'booking-special-calendar'), $closeOpenTxt) . '</button>';
+                array_push($json->data, [$value->id, $value->h_from, $value->h_to, $value->created_at, $action]);
+            }
+
+            file_put_contents(plugin_dir_path(__FILE__) . 'payload.json', json_encode($json), LOCK_EX);
+        }
+
+        header('Content-Type: application/json');
+        echo file_get_contents(plugin_dir_path(__FILE__) . 'payload.json');
+        die;
     }
 
     public static function deleteMeeting($post_id)
@@ -206,12 +358,15 @@ class BSLC_Booking
         if ($query = $wpdb->get_row($wpdb->prepare($sql, $hourid))) {
             if ($query->post_id == $post_id) {
                 if ($string === 'trash' || $string === 'draft') {
-                    $mysqlData = ['meta_data' => ''];
+                    $mysqlData = ['meta_data' => '', 'display' => 'open'];
+//                    $mysqlData = ['meta_data' => $string, 'status' => 'disabled'];
                     $wpdb->update($wpdb->prefix . 'special_booking', $mysqlData, $where, $format, $where_format);
                 } else {
-                    $mysqlData = ['meta_data' => $string];
+                    $mysqlData = ['meta_data' => $string, 'display' => 'close'];
                     $wpdb->update($wpdb->prefix . 'special_booking', $mysqlData, $where, $format, $where_format);
                     $_SESSION['success_message'] = $string;
+                    //add to google calendar.
+
                 }
 
                 return true;
@@ -242,7 +397,6 @@ class BSLC_Booking
         ];
 
         $validateHour = new WP_Query($args);
-
         return $validateHour->post_count;
     }
 
@@ -279,9 +433,9 @@ class BSLC_Booking
         if (!isset($json['error'])) {
             if (isset($_POST['hour_id']) && !empty($_POST['hour_id']) && is_numeric($_POST['hour_id']) && $_POST['hour_id'] > 0) {
                 $data['hour_id'] = sanitize_text_field($_POST['hour_id']);
-                $sql = "SELECT * FROM " . $wpdb->prefix . "special_booking WHERE id = %d";
-                if ($query = $wpdb->get_row($wpdb->prepare($sql, $data['hour_id']))) {
-                    if (!$query->meta_data) {
+                if (!self::validateHourId($data['hour_id'])) {
+                    $sql = "SELECT * FROM " . $wpdb->prefix . "special_booking WHERE id = %d";
+                    if ($query = $wpdb->get_row($wpdb->prepare($sql, $data['hour_id']))) {
                         if (isset($_POST['fName']) && !empty($_POST['fName'])) {
                             $data['fName'] = trim(sanitize_text_field($_POST['fName']));
                         } else {
@@ -318,8 +472,8 @@ class BSLC_Booking
 
                             $new_post = wp_insert_post($args);
                             if ($new_post) {
-                                $mysqlData = ['meta_data' => 'pending', 'post_id' => $new_post];
-                                $format = ['%s', '%d'];
+                                $mysqlData = ['display' => 'close', 'meta_data' => 'pending', 'post_id' => $new_post];
+                                $format = ['%s', '%s', '%d'];
                                 $where = ['id' => $query->id];
                                 $where_format = ['%d'];
                                 $update = $wpdb->update($wpdb->prefix . 'special_booking', $mysqlData, $where, $format, $where_format);
@@ -331,7 +485,6 @@ class BSLC_Booking
                                     update_post_meta($new_post, 'bslc_hourid', $query->id);
                                     update_post_meta($new_post, 'bslc_first_name', $data['fName']);
                                     update_post_meta($new_post, 'bslc_last_name', $data['lName']);
-
                                     $json['success'] = _x('Request accepted. thank you.', 'booking-special-calendar');
                                 } else {
                                     $json['error'] = _x('Network Error.', 'booking-special-calendar');
@@ -343,10 +496,10 @@ class BSLC_Booking
                             $json['error'] = _x('All fields are required.', 'booking-special-calendar');
                         }
                     } else {
-                        $json['error'] = _x('Unavailable hour.', 'booking-special-calendar');
+                        $json['error'] = _x('Unknown meeting hour.', 'booking-special-calendar');
                     }
                 } else {
-                    $json['error'] = _x('Unknown meeting hour.', 'booking-special-calendar');
+                    $json['error'] = _x('Sorry, chosen hour is unavailable.', 'booking-special-calendar');
                 }
             } else {
                 $json['error'] = _x('Unknown meeting hour.', 'booking-special-calendar');
@@ -451,10 +604,10 @@ class BSLC_Booking
                             if ($day) {
                                 $jump = ($data['bslc_jumps'] == 30 || $data['bslc_jumps'] == 60) ? $data['bslc_jumps'] : false;
                                 $h_from = $data['bslc_day'] . ' ' . $data['bslc_from'] . ':' . '00' . ':00';
-                                $time = strtotime($h_from);
-                                $endTime = date("Y-m-d H:i:s", strtotime('+' . $jump . ' minutes', $time));
 
                                 while ($data['bslc_from'] < $data['bslc_to']) {
+                                    $time = strtotime($h_from);
+                                    $endTime = date("Y-m-d H:i:s", strtotime('+' . $jump . ' minutes', $time));
                                     $wpdb->insert(
                                         $wpdb->prefix . 'special_booking',
                                         [
@@ -495,20 +648,34 @@ class BSLC_Booking
         }
     }
 
+    public static function admin_assets()
+    {
+        if (isset($_GET['post_type']) && !empty($_GET['post_type']) && $_GET['post_type'] === 'special-calendar') {
+            /*datatable.net*/
+            wp_enqueue_style('bslc-datatable-css', '//cdn.datatables.net/1.10.20/css/jquery.dataTables.min.css', null, null, 'all');
+            wp_enqueue_script('bslc-datatablejs', '//cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js', ['jquery'], self::$bslc_asset_version, true);
+
+            wp_enqueue_script('bslc-admin-script', plugin_dir_url(__FILE__) . 'admin/js/bslc_admin_script.js', ['bslc-datatablejs'], self::$bslc_asset_version, true);
+
+            /*iziToast*/
+            wp_enqueue_style('bslc-iziToastcss-admin', plugin_dir_url(__FILE__) . 'admin/css/iziToast.css', null, self::$bslc_asset_version, 'all');
+            wp_enqueue_script('bslc-iziToastjs-admin', plugin_dir_url(__FILE__) . 'admin/js/iziToast.js', null, self::$bslc_asset_version, true);
+
+            wp_localize_script('bslc-admin-script', 'BSLC', [
+                'bslc_houraction' => wp_create_nonce('bslc_houraction'),
+            ]);
+        }
+    }
+
     public static function assets()
     {
-
         /*My ;)*/
         wp_enqueue_style('bslc-bookings-css', plugin_dir_url(__FILE__) . 'public/css/bslc-style.css', null, self::$bslc_asset_version, 'all');
         wp_enqueue_script('bslc-bookings-js', plugin_dir_url(__FILE__) . 'public/js/calendar.js', ['bslc-iziToastjs'], self::$bslc_asset_version, true);
 
         /*iziToast*/
-        wp_enqueue_style('bslc-iziToastcss', plugin_dir_url(__FILE__) . 'public/css/iziToast.css', self::$bslc_asset_version, null, 'all');
-        wp_enqueue_script('bslc-iziToastjs', plugin_dir_url(__FILE__) . 'public/js/iziToast.js', self::$bslc_asset_version, true);
-
-        /*datatable.net*/
-        wp_enqueue_style('bslc-datatable-css', '//cdn.datatables.net/1.10.20/css/jquery.dataTables.min.css', null, null, 'all');
-        wp_enqueue_script('bslc-datatable-js', '//cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js', ['bslc-iziToastjs'], self::$bslc_asset_version, true);
+        wp_enqueue_style('bslc-iziToastcss', plugin_dir_url(__FILE__) . 'public/css/iziToast.css', null, self::$bslc_asset_version, 'all');
+        wp_enqueue_script('bslc-iziToastjs', plugin_dir_url(__FILE__) . 'public/js/iziToast.js', null, self::$bslc_asset_version, true);
 
         wp_localize_script('bslc-bookings-js', 'CALENDAR', [
             'ajaxurl' => admin_url('admin-ajax.php'),
@@ -581,6 +748,8 @@ class BSLC_Booking
                   h_from datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
                   h_to datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
                   meta_data text NOT NULL,
+                  status varchar(255) DEFAULT 'enabled' NOT NULL,
+                  display varchar(255) DEFAULT 'open' NOT NULL,
                   created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
                   PRIMARY KEY  (id)
                 ) $charset_collate;";

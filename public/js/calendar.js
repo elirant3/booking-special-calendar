@@ -70,15 +70,6 @@ let calendar = {
             return '<button data-period="' + period + '" class="s_btn s_btn_prev s_calendar_prev">Prev ' + period + '</button>';
         },
     },
-    init: function () {
-        if (this.date === null) this.date = new Date();
-        this.markup = '<div class="actionLine">';
-        this.markup += '<p>' + this.next.markup('month') + '' + this.prev.markup('month') + '</p>';
-        this.markup += '<p>' + this.next.markup('year') + '' + this.prev.markup('year') + '</p>';
-        this.markup += '<p><input type="date" value="' + this.customDateValue + '" name="customDate" class="customDate"></p>';
-        this.markup += '</div>';
-        this.setHours.get.call(this)
-    },
     genForm: {
         hour_id: undefined,
         form: '',
@@ -148,7 +139,7 @@ let calendar = {
                     throw new Error('Network Error');
                 };
 
-                xhr.open('POST', CALENDAR.ajaxurl, true);
+                xhr.open('POST', e.ajaxurl, true);
                 xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
                 xhr.send('action=' + 'bslc_addNewMeetingRequest' +
                     '&lName=' + this.querySelector('input[name=lName]').value +
@@ -287,7 +278,7 @@ let calendar = {
                         throw new Error('Network Error');
                     };
 
-                    xhr.open('POST', CALENDAR.ajaxurl, true);
+                    xhr.open('POST', that.ajaxurl, true);
                     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
                     xhr.send("action=bslc_getCalendarHours&date=" + Date.parse(that.date));
                 }
@@ -295,6 +286,15 @@ let calendar = {
 
             trigger();
         },
+    },
+    init: function () {
+        if (this.date === null) this.date = new Date();
+        this.markup = '<div class="actionLine">';
+        this.markup += '<p>' + this.next.markup('month') + '' + this.prev.markup('month') + '</p>';
+        this.markup += '<p>' + this.next.markup('year') + '' + this.prev.markup('year') + '</p>';
+        this.markup += '<p><input type="date" value="' + this.customDateValue + '" name="customDate" class="customDate"></p>';
+        this.markup += '</div>';
+        this.setHours.get.call(this)
     },
     setCustomDate: function (that) {
         return function () {
@@ -401,7 +401,6 @@ let calendar = {
     closeHourBox: function () {
         try {
             this.parentNode.classList.remove('active');
-            console.log(this)
         } catch (e) {
             console.error(e.message);
         }
@@ -435,7 +434,7 @@ let calendar = {
             this.markup += '</li>'
             let payload = '',
                 that = this,
-                status;
+                display;
 
             for (let x = 1; x <= this.days; x++) {
                 try {
@@ -451,11 +450,14 @@ let calendar = {
                         that.markup += '<div class="hoursBox">';
                         that.markup += '<span class="closeHoursBox">&#10799;</span>';
                         payload.forEach(function (obj, key) {
-                            status = (obj.meta_data) ? (obj.meta_data === 'approved') ? 'unavailable approved' : 'unavailable' : '';
-                            obj.h_from = new Date(obj.h_from);
-                            obj.h_to = new Date(obj.h_to);
-                            that.markup += '<p data-hourid="' + obj.id + '" class="hour ' + status + '">' + obj.h_from.getHours() + ':' + addZero(obj.h_from.getMinutes()) + ':' + addZero(obj.h_from.getSeconds())
-                                + ' - ' + obj.h_to.getHours() + ':' + addZero(obj.h_to.getMinutes()) + ':' + addZero(obj.h_to.getSeconds()) + '</p>';
+                            if (obj.status === 'enabled') {
+                                display = (obj.display === 'close') ? 'unavailable approved' : '';
+
+                                obj.h_from = new Date(obj.h_from);
+                                obj.h_to = new Date(obj.h_to);
+                                that.markup += '<p data-hourid="' + obj.id + '" class="hour ' + display + '">' + obj.h_from.getHours() + ':' + addZero(obj.h_from.getMinutes()) + ':' + addZero(obj.h_from.getSeconds())
+                                    + ' - ' + obj.h_to.getHours() + ':' + addZero(obj.h_to.getMinutes()) + ':' + addZero(obj.h_to.getSeconds()) + '</p>';
+                            }
                         });
                         that.markup += '</div>';
                         that.markup += '</li>';
@@ -474,30 +476,28 @@ let calendar = {
     }
 };
 
-function SpecialCalendar(object_id) {
+function SpecialCalendar(object_id, properties) {
     this.object_id = object_id;
-    this.calendarObject = null;
+    this.ajaxurl = properties.ajaxurl;
 
-    this.generateBoard = function () {
-        let tmp = document.querySelector(this.object_id);
+    let tmp = document.querySelector(this.object_id);
 
-        if (this.object_id === '.s_calendar')
-            throw new Error('Object id illegal. ' + this.object_id + ' reserved word.');
+    if (this.object_id === '.s_calendar')
+        throw new Error('Object id illegal. ' + this.object_id + ' reserved word.');
 
-        if (tmp) {
-            tmp.classList.add('s_calendar');
-            this.calendarObject = Object.create(calendar);
-            this.calendarObject.calendarPointer = tmp;
-            calendar.init.call(this.calendarObject);
-        }
-    };
-
-    this.generateBoard.call(this);
+    if (tmp) {
+        tmp.classList.add('s_calendar');
+        this.calendarPointer = tmp;
+    }
 }
 
 document.addEventListener("DOMContentLoaded", function (event) {
     try {
-        new SpecialCalendar('.calendar1');
+        SpecialCalendar.prototype = Object.create(calendar);
+        let SCalendar = new SpecialCalendar('.calendar1', {
+            ajaxurl: CALENDAR.ajaxurl,
+        });
+        SCalendar.init();
     } catch (e) {
         console.error(e.message);
         console.error(e.stack);

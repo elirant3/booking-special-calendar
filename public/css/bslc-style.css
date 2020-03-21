@@ -220,10 +220,6 @@
     padding-top: .5em;
 }
 
-.s_calendar ul li.day .hoursBox p:last-child {
-    padding-top: .5em;
-}
-
 .s_calendar .closeHoursBox {
     position: absolute;
     right: 5px;

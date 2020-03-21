@@ -1,18 +1,20 @@
-<table id="bslc_hours" class="display">
+<table id="bslc_hours" class="display" style="width:100%">
     <thead>
     <tr>
-        <th>Column 1</th>
-        <th>Column 2</th>
+        <th><?= _x('ID', 'booking-special-calendar'); ?></th>
+        <th><?= _x('From', 'booking-special-calendar'); ?></th>
+        <th><?= _x('To', 'booking-special-calendar'); ?></th>
+        <th><?= _x('Created at', 'booking-special-calendar'); ?></th>
+        <th><?= _x('Action', 'booking-special-calendar'); ?></th>
     </tr>
     </thead>
-    <tbody>
+    <tfoot>
     <tr>
-        <td>Row 1 Data 1</td>
-        <td>Row 1 Data 2</td>
+        <th><?= _x('ID', 'booking-special-calendar'); ?></th>
+        <th><?= _x('From', 'booking-special-calendar'); ?></th>
+        <th><?= _x('To', 'booking-special-calendar'); ?></th>
+        <th><?= _x('Created at', 'booking-special-calendar'); ?></th>
+        <th><?= _x('Action', 'booking-special-calendar'); ?></th>
     </tr>
-    <tr>
-        <td>Row 2 Data 1</td>
-        <td>Row 2 Data 2</td>
-    </tr>
-    </tbody>
+    </tfoot>
 </table>
